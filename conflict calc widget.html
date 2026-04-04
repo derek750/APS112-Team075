@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conflict Rate Calculator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; padding: 2rem; }
+  h2 { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #888; margin: 1.5rem 0 .6rem; }
+  .card { background: #262626; border: 1px solid #333; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: .75rem; }
+  .route-grid { display: grid; grid-template-columns: 70px 1fr 1fr 1fr; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #333; font-size: 13px; }
+  .route-grid:last-child { border-bottom: none; }
+  .route-grid.header { font-size: 11px; color: #666; font-weight: 600; padding-bottom: 8px; }
+  .route-grid input { width: 100%; font-size: 13px; padding: 5px 8px; border: 1px solid #444; border-radius: 6px; background: #1e1e1e; color: #e0e0e0; }
+  .route-grid input:focus { outline: none; border-color: #4a9eff; }
+  .na { color: #555; font-size: 12px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: .75rem; }
+  .metric { background: #1e1e1e; border-radius: 8px; padding: .75rem 1rem; }
+  .metric-label { font-size: 11px; color: #666; margin-bottom: 4px; }
+  .metric-val { font-size: 22px; font-weight: 600; }
+  .metric-val.blue { color: #4a9eff; }
+  .metric-val.red { color: #ff5555; }
+  .metric-val.green { color: #50fa7b; }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 99px; margin-left: 6px; vertical-align: middle; }
+  .badge.fail { background: #3d1515; color: #ff5555; }
+  .badge.pass { background: #153d1f; color: #50fa7b; }
+  .workings-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid #2a2a2a; font-size: 13px; }
+  .workings-row:last-child { border-bottom: none; }
+  .wlabel { font-size: 11px; font-weight: 600; color: #666; min-width: 30px; margin-top: 1px; flex-shrink: 0; }
+  .wtext { color: #888; line-height: 1.5; }
+  .wval { font-weight: 600; color: #e0e0e0; margin-left: auto; min-width: 55px; text-align: right; flex-shrink: 0; }
+  .subtotal { background: #1e1e1e; border-radius: 6px; padding: 7px 10px; margin-top: 4px; }
+  .section-head { font-size: 11px; font-weight: 600; color: #666; margin: 8px 0 4px; }
+  hr.div { border: none; border-top: 1px solid #333; margin: 6px 0; }
+  .compare-grid { display: grid; grid-template-columns: 60px 1fr 1fr 90px; gap: 8px; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #2a2a2a; }
+  .compare-grid:last-child { border-bottom: none; }
+  .compare-grid.header { font-size: 11px; color: #666; font-weight: 600; }
+  .winner { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+  .winner.proposed { background: #153d1f; color: #50fa7b; }
+  .winner.current { background: #3d2b10; color: #ffb86c; }
+  .verdict { text-align: center; padding: 1rem; font-size: 15px; font-weight: 600; border-radius: 8px; margin-top: .75rem; }
+  .verdict.pass { background: #153d1f; color: #50fa7b; }
+  .verdict.fail { background: #3d1515; color: #ff5555; }
+  .verdict.pending { background: #1e1e1e; color: #666; }
+  .day-tabs { display: flex; gap: 6px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .day-tab { padding: 6px 16px; font-size: 13px; font-weight: 500; border: 1px solid #444; border-radius: 99px; background: transparent; color: #888; cursor: pointer; }
+  .day-tab.active { background: #4a9eff22; border-color: #4a9eff; color: #4a9eff; }
+  .day-tab:hover:not(.active) { border-color: #666; color: #ccc; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 600; color: #e0e0e0; margin-bottom: .25rem; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Conflict Rate Calculator</h1>
+  <p class="subtitle">Current layout → Proposed layout comparison. Enter data for each day and switch between days using the tabs.</p>
+
+  <div class="day-tabs" id="day-tabs"></div>
+
+  <h2>Step 1 — Current layout: daily user data</h2>
+  <div class="card">
+    <div class="route-grid header"><div>Route</div><div>Users on route</div><div>PP conflicts</div><div>Bil conflicts</div></div>
+    <div id="route-inputs"></div>
+  </div>
+
+  <h2>Step 2 — Conflict rates (current layout)</h2>
+  <div class="metrics" id="current-metrics"></div>
+  <div class="card" id="current-workings"></div>
+
+  <h2>Step 3 — Proposed layout intersections</h2>
+  <div class="card" style="font-size:13px; color:#888; padding:.75rem 1.25rem;">
+    Routes A–D → <strong style="color:#e0e0e0">Billiards only</strong> &nbsp;|&nbsp; Routes E–H → <strong style="color:#e0e0e0">Ping Pong only</strong>
+  </div>
+
+  <h2>Step 4 — Predicted conflicts (proposed layout)</h2>
+  <div class="metrics" id="proposed-metrics"></div>
+  <div class="card" id="proposed-workings"></div>
+
+  <h2>Step 5 — All days comparison</h2>
+  <div class="card">
+    <div class="compare-grid header"><div>Day</div><div>Current conflicts/day</div><div>Predicted conflicts/day</div><div>Better</div></div>
+    <div id="compare-rows"></div>
+    <div class="verdict pending" id="verdict">Enter data for all 5 days to see result</div>
+  </div>
+</div>
+
+<script>
+const DAYS = 5;
+const routeDefs = [
+  { id:'A', pp:true,  bil:false },
+  { id:'B', pp:true,  bil:true  },
+  { id:'C', pp:true,  bil:true  },
+  { id:'D', pp:true,  bil:true  },
+  { id:'E', pp:false, bil:true  },
+  { id:'F', pp:false, bil:true  },
+  { id:'G', pp:false, bil:false },
+  { id:'H', pp:false, bil:false },
+];
+
+// Proposed: A-D → Bil only, E-H → PP only
+const propIntersect = [
+  { pp:false, bil:true  },
+  { pp:false, bil:true  },
+  { pp:false, bil:true  },
+  { pp:false, bil:true  },
+  { pp:true,  bil:false },
+  { pp:true,  bil:false },
+  { pp:true,  bil:false },
+  { pp:true,  bil:false },
+];
+
+let currentDay = 1;
+const dayResults = {};
+
+// Store data per day
+const dayData = {};
+for (let d = 1; d <= DAYS; d++) {
+  dayData[d] = {};
+  routeDefs.forEach(r => {
+    dayData[d]['u_' + r.id] = '';
+    if (r.pp)  dayData[d]['ppc_' + r.id] = '';
+    if (r.bil) dayData[d]['bilc_' + r.id] = '';
+  });
+}
+
+function buildTabs() {
+  const tabs = document.getElementById('day-tabs');
+  tabs.innerHTML = '';
+  for (let d = 1; d <= DAYS; d++) {
+    const btn = document.createElement('button');
+    btn.className = 'day-tab' + (d === currentDay ? ' active' : '');
+    btn.textContent = 'Day ' + d;
+    btn.onclick = () => switchDay(d);
+    tabs.appendChild(btn);
+  }
+}
+
+function switchDay(d) {
+  saveCurrentInputs();
+  currentDay = d;
+  buildTabs();
+  loadInputs();
+  compute();
+}
+
+function saveCurrentInputs() {
+  routeDefs.forEach(r => {
+    const u = document.getElementById('u_' + r.id);
+    if (u) dayData[currentDay]['u_' + r.id] = u.value;
+    if (r.pp) { const el = document.getElementById('ppc_' + r.id); if (el) dayData[currentDay]['ppc_' + r.id] = el.value; }
+    if (r.bil) { const el = document.getElementById('bilc_' + r.id); if (el) dayData[currentDay]['bilc_' + r.id] = el.value; }
+  });
+}
+
+function loadInputs() {
+  routeDefs.forEach(r => {
+    const u = document.getElementById('u_' + r.id);
+    if (u) u.value = dayData[currentDay]['u_' + r.id] || '';
+    if (r.pp) { const el = document.getElementById('ppc_' + r.id); if (el) el.value = dayData[currentDay]['ppc_' + r.id] || ''; }
+    if (r.bil) { const el = document.getElementById('bilc_' + r.id); if (el) el.value = dayData[currentDay]['bilc_' + r.id] || ''; }
+  });
+}
+
+function buildInputs() {
+  const ri = document.getElementById('route-inputs');
+  ri.innerHTML = '';
+  routeDefs.forEach(r => {
+    const ppCell  = r.pp  ? `<input id="ppc_${r.id}"  type="number" min="0" placeholder="0" oninput="onInput()">` : `<span class="na">n/a</span>`;
+    const bilCell = r.bil ? `<input id="bilc_${r.id}" type="number" min="0" placeholder="0" oninput="onInput()">` : `<span class="na">n/a</span>`;
+    ri.innerHTML += `<div class="route-grid">
+      <div style="font-weight:600">Route ${r.id}</div>
+      <input id="u_${r.id}" type="number" min="0" placeholder="0" oninput="onInput()">
+      <div>${ppCell}</div>
+      <div>${bilCell}</div>
+    </div>`;
+  });
+}
+
+function onInput() {
+  saveCurrentInputs();
+  compute();
+}
+
+function getVal(id) { const el = document.getElementById(id); return el ? (+el.value || 0) : 0; }
+
+function compute() {
+  const data = routeDefs.map(r => ({
+    id: r.id,
+    users: getVal('u_' + r.id),
+    ppC:   r.pp  ? Math.min(getVal('u_' + r.id), getVal('ppc_'  + r.id)) : 0,
+    bilC:  r.bil ? Math.min(getVal('u_' + r.id), getVal('bilc_' + r.id)) : 0,
+  }));
+
+  let ppC=0, ppP=0, bilC=0, bilP=0;
+  data.forEach((d, i) => {
+    if (routeDefs[i].pp)  { ppC += d.ppC;   ppP += d.users; }
+    if (routeDefs[i].bil) { bilC += d.bilC;  bilP += d.users; }
+  });
+
+  const ppRate  = ppP  ? ppC / ppP  : 0;
+  const bilRate = bilP ? bilC / bilP : 0;
+  const totalCurrent = ppC + bilC;
+  const goalOk = totalCurrent < 8 && totalCurrent > 0;
+
+  // Current metrics
+  document.getElementById('current-metrics').innerHTML = `
+    <div class="metric"><div class="metric-label">PP conflict rate</div><div class="metric-val blue">${ppP ? (ppRate*100).toFixed(1)+'%' : '—'}</div></div>
+    <div class="metric"><div class="metric-label">Bil conflict rate</div><div class="metric-val blue">${bilP ? (bilRate*100).toFixed(1)+'%' : '—'}</div></div>
+    <div class="metric"><div class="metric-label">Total conflicts/day</div><div class="metric-val ${totalCurrent===0?'':''}${goalOk?'green':'red'}">${totalCurrent||'—'}${totalCurrent>0?`<span class="badge ${goalOk?'pass':'fail'}">${goalOk?'< 8 ✓':'≥ 8 ✗'}</span>`:''}</div></div>
+  `;
+
+  document.getElementById('current-workings').innerHTML = `
+    <div class="workings-row"><span class="wlabel">PP</span><span class="wtext">Conflicts / Possible = ${ppC} / ${ppP}</span><span class="wval">${ppP?(ppRate*100).toFixed(1)+'%':'—'}</span></div>
+    <div class="workings-row"><span class="wlabel">Bil</span><span class="wtext">Conflicts / Possible = ${bilC} / ${bilP}</span><span class="wval">${bilP?(bilRate*100).toFixed(1)+'%':'—'}</span></div>
+    <div class="workings-row"><span class="wlabel">Tot</span><span class="wtext">Total conflicts/day = PP conflicts + Bil conflicts = ${ppC} + ${bilC}</span><span class="wval">${totalCurrent}</span></div>
+  `;
+
+  // Proposed predictions
+  let predPPraw = 0, predBilraw = 0;
+  let ppRows = '', bilRows = '';
+
+  data.forEach((d, i) => {
+    const p = propIntersect[i];
+    if (p.pp) {
+      const pred = d.users * ppRate;
+      predPPraw += pred;
+      ppRows += `<div class="workings-row"><span class="wlabel">R${d.id}</span><span class="wtext">${d.users} users × ${(ppRate*100).toFixed(1)}% PP rate</span><span class="wval">${pred.toFixed(2)}</span></div>`;
+    }
+    if (p.bil) {
+      const pred = d.users * bilRate;
+      predBilraw += pred;
+      bilRows += `<div class="workings-row"><span class="wlabel">R${d.id}</span><span class="wtext">${d.users} users × ${(bilRate*100).toFixed(1)}% Bil rate</span><span class="wval">${pred.toFixed(2)}</span></div>`;
+    }
+  });
+
+  const totalProposed = Math.round(predPPraw + predBilraw);
+  const goalProposed = totalProposed < 8 && totalProposed > 0;
+
+  document.getElementById('proposed-metrics').innerHTML = `
+    <div class="metric"><div class="metric-label">Predicted PP conflicts</div><div class="metric-val blue">${predPPraw>0?predPPraw.toFixed(1):'—'}</div></div>
+    <div class="metric"><div class="metric-label">Predicted Bil conflicts</div><div class="metric-val blue">${predBilraw>0?predBilraw.toFixed(1):'—'}</div></div>
+    <div class="metric"><div class="metric-label">Predicted conflicts/day</div><div class="metric-val ${totalProposed===0?'':''}${goalProposed?'green':'red'}">${totalProposed||'—'}${totalProposed>0?`<span class="badge ${goalProposed?'pass':'fail'}">${goalProposed?'< 8 ✓':'≥ 8 ✗'}</span>`:''}</div></div>
+  `;
+
+  document.getElementById('proposed-workings').innerHTML = `
+    <div class="section-head">Ping Pong (routes E–H)</div>
+    ${ppRows || '<div class="workings-row"><span class="wtext" style="color:#555">No data yet</span></div>'}
+    <div class="workings-row subtotal"><span class="wlabel">PP</span><span class="wtext">Predicted PP subtotal (unrounded)</span><span class="wval">${predPPraw.toFixed(2)}</span></div>
+    <hr class="div">
+    <div class="section-head">Billiards (routes A–D)</div>
+    ${bilRows || '<div class="workings-row"><span class="wtext" style="color:#555">No data yet</span></div>'}
+    <div class="workings-row subtotal"><span class="wlabel">Bil</span><span class="wtext">Predicted Bil subtotal (unrounded)</span><span class="wval">${predBilraw.toFixed(2)}</span></div>
+    <hr class="div">
+    <div class="workings-row"><span class="wlabel">Tot</span><span class="wtext">Predicted conflicts/day = PP + Bil = ${predPPraw.toFixed(2)} + ${predBilraw.toFixed(2)} → rounded</span><span class="wval">${totalProposed}</span></div>
+  `;
+
+  // Store result for comparison
+  if (totalCurrent > 0) {
+    dayResults[currentDay] = { current: totalCurrent, proposed: totalProposed };
+  }
+
+  updateComparison();
+}
+
+function updateComparison() {
+  let rows = '';
+  for (let d = 1; d <= DAYS; d++) {
+    const dr = dayResults[d];
+    if (!dr) {
+      rows += `<div class="compare-grid"><div>Day ${d}</div><div style="color:#555">—</div><div style="color:#555">—</div><div></div></div>`;
+    } else {
+      const better = dr.proposed < dr.current ? 'proposed' : 'current';
+      const badge = better === 'proposed'
+        ? `<span class="winner proposed">Proposed</span>`
+        : `<span class="winner current">Current</span>`;
+      rows += `<div class="compare-grid"><div>Day ${d}</div><div>${dr.current}</div><div>${dr.proposed}</div><div>${badge}</div></div>`;
+    }
+  }
+  document.getElementById('compare-rows').innerHTML = rows;
+
+  const filled = Object.values(dayResults).filter(Boolean);
+  const propWins = filled.filter(d => d.proposed < d.current).length;
+  const v = document.getElementById('verdict');
+  if (filled.length < DAYS) {
+    v.className = 'verdict pending';
+    v.textContent = `${DAYS - filled.length} day(s) remaining`;
+  } else if (propWins >= 3) {
+    v.className = 'verdict pass';
+    v.textContent = `Proposed layout wins ${propWins}/5 days — design is successful ✓`;
+  } else {
+    v.className = 'verdict fail';
+    v.textContent = `Proposed layout wins only ${propWins}/5 days — design does not meet threshold ✗`;
+  }
+}
+
+buildTabs();
+buildInputs();
+compute();
+</script>
+</body>
+</html>

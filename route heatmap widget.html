@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route Heatmap Visualizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; padding: 2rem; min-height: 100vh; }
+
+  .container { display: flex; gap: 2rem; max-width: 1100px; margin: 0 auto; align-items: flex-start; }
+  .map-panel { flex: 1; min-width: 0; }
+  .controls-panel { width: 300px; flex-shrink: 0; }
+
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: .25rem; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+
+  h2 { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #888; margin: 1.25rem 0 .6rem; }
+
+  .card { background: #262626; border: 1px solid #333; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: .75rem; }
+
+  .map-wrapper {
+    position: relative;
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #333;
+    background: #222;
+  }
+  .map-wrapper img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .map-wrapper svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .day-tabs { display: flex; gap: 6px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .day-tab {
+    padding: 6px 16px; font-size: 13px; font-weight: 500;
+    border: 1px solid #444; border-radius: 99px;
+    background: transparent; color: #888; cursor: pointer;
+    transition: all .15s;
+  }
+  .day-tab.active { background: #4a9eff22; border-color: #4a9eff; color: #4a9eff; }
+  .day-tab:hover:not(.active) { border-color: #666; color: #ccc; }
+
+  .route-row {
+    display: grid;
+    grid-template-columns: 54px 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid #333;
+    font-size: 13px;
+  }
+  .route-row:last-child { border-bottom: none; }
+  .route-label { font-weight: 600; font-size: 13px; }
+  .route-row input {
+    width: 100%; font-size: 13px; padding: 5px 8px;
+    border: 1px solid #444; border-radius: 6px;
+    background: #1e1e1e; color: #e0e0e0;
+  }
+  .route-row input:focus { outline: none; border-color: #4a9eff; }
+  .route-row input:disabled { opacity: .5; cursor: not-allowed; }
+
+  .color-swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; margin-right: 6px; vertical-align: middle;
+    border: 1px solid #555;
+  }
+
+  .legend {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #888; margin-top: .75rem;
+  }
+  .legend-bar {
+    width: 140px; height: 12px; border-radius: 4px;
+    border: 1px solid #444;
+  }
+
+  @media (max-width: 800px) {
+    .container { flex-direction: column; }
+    .controls-panel { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div style="max-width:1100px; margin:0 auto;">
+  <h1>Route Heatmap Visualizer</h1>
+  <p class="subtitle">Enter user counts per route to see traffic intensity on the floor plan.</p>
+</div>
+
+<div class="container">
+  <div class="map-panel">
+    <div class="map-wrapper" id="map-wrapper">
+      <img id="floor-img" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Floor Plan">
+      <svg id="route-svg" viewBox="0 0 1024 412" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <clipPath id="main-room-clip">
+            <rect x="270" y="48" width="726" height="334"/>
+          </clipPath>
+        </defs>
+        <g id="heat-layer" clip-path="url(#main-room-clip)"></g>
+      </svg>
+    </div>
+
+    <div class="legend">
+      <span>Low</span>
+      <canvas id="legend-bar" class="legend-bar" width="140" height="12"></canvas>
+      <span>High</span>
+    </div>
+  </div>
+
+  <div class="controls-panel">
+    <h2>Day</h2>
+    <div class="day-tabs" id="day-tabs"></div>
+
+    <h2>Users per route</h2>
+    <div class="card" id="route-inputs"></div>
+  </div>
+</div>
+
+<script>
+const DAYS = 5;
+const ROUTES = ['A','B','C','D','E','F','G','H'];
+const ALL_DAYS = 0; // special tab value for aggregate view
+
+// Zone masks: heatmap-reference-layout.png (color-coded A–H) → LAB match → zones/mask-*.png (pure red + alpha).
+// Regenerate: .venv-trace/bin/python scripts/trace_zones.py — sync zone-labels.json into ZONE_LABELS.
+const ZONE_LABELS = {
+  A: [395.7, 241.5], B: [560.8, 212.2], C: [561.7, 105.9], D: [506.6, 304.6],
+  E: [723.3, 285.2], F: [702.0, 203.2], G: [926.0, 207.0], H: [840.8, 179.7],
+};
+
+function ensureHeatMaskImages() {
+  const heatLayer = document.getElementById('heat-layer');
+  if (heatLayer.querySelector('.route-heat-mask')) return;
+  ROUTES.forEach(r => {
+    const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+    im.classList.add('route-heat-mask');
+    im.setAttribute('id', 'heat_img_' + r);
+    im.setAttribute('href', 'zones/mask-' + r + '.png');
+    im.setAttribute('x', '0');
+    im.setAttribute('y', '0');
+    im.setAttribute('width', '1024');
+    im.setAttribute('height', '412');
+    im.setAttribute('preserveAspectRatio', 'none');
+    im.style.mixBlendMode = 'screen';
+    heatLayer.appendChild(im);
+  });
+}
+
+let currentDay = 1;
+const dayData = {};
+for (let d = 1; d <= DAYS; d++) {
+  dayData[d] = {};
+  ROUTES.forEach(r => dayData[d][r] = '');
+}
+
+function heatColor(ratio) {
+  if (ratio <= 0) return { r: 255, g: 0, b: 0, a: 0.02 };
+  const a = 0.08 + ratio * 0.52;
+  return { r: 255, g: 0, b: 0, a };
+}
+
+function colorStr(c) {
+  return `rgba(${c.r},${c.g},${c.b},${c.a})`;
+}
+
+function buildTabs() {
+  const tabs = document.getElementById('day-tabs');
+  tabs.innerHTML = '';
+  for (let d = 1; d <= DAYS; d++) {
+    const btn = document.createElement('button');
+    btn.className = 'day-tab' + (d === currentDay ? ' active' : '');
+    btn.textContent = 'Day ' + d;
+    btn.onclick = () => switchDay(d);
+    tabs.appendChild(btn);
+  }
+  const allBtn = document.createElement('button');
+  allBtn.className = 'day-tab' + (currentDay === ALL_DAYS ? ' active' : '');
+  allBtn.textContent = 'All Days';
+  allBtn.onclick = () => switchDay(ALL_DAYS);
+  tabs.appendChild(allBtn);
+}
+
+function switchDay(d) {
+  saveInputs();
+  currentDay = d;
+  buildTabs();
+  loadInputs();
+  render();
+}
+
+function saveInputs() {
+  if (currentDay === ALL_DAYS) return;
+  ROUTES.forEach(r => {
+    const el = document.getElementById('input_' + r);
+    if (el) dayData[currentDay][r] = el.value;
+  });
+}
+
+function loadInputs() {
+  ROUTES.forEach(r => {
+    const el = document.getElementById('input_' + r);
+    if (!el) return;
+    if (currentDay === ALL_DAYS) {
+      let sum = 0;
+      for (let d = 1; d <= DAYS; d++) sum += +(dayData[d][r]) || 0;
+      el.value = sum || '';
+      el.disabled = true;
+    } else {
+      el.value = dayData[currentDay][r] || '';
+      el.disabled = false;
+    }
+  });
+}
+
+function buildInputs() {
+  const container = document.getElementById('route-inputs');
+  container.innerHTML = '';
+  ROUTES.forEach(r => {
+    container.innerHTML += `
+      <div class="route-row">
+        <div class="route-label"><span class="color-swatch" id="swatch_${r}"></span>${r}</div>
+        <input id="input_${r}" type="number" min="0" placeholder="0" oninput="onInput()">
+      </div>`;
+  });
+}
+
+function onInput() {
+  saveInputs();
+  render();
+}
+
+function getVal(r) {
+  if (currentDay === ALL_DAYS) {
+    let sum = 0;
+    for (let d = 1; d <= DAYS; d++) sum += +(dayData[d][r]) || 0;
+    return sum;
+  }
+  return +(dayData[currentDay][r]) || 0;
+}
+
+function render() {
+  ensureHeatMaskImages();
+
+  const values = {};
+  let maxVal = 0;
+  ROUTES.forEach(r => {
+    values[r] = getVal(r);
+    if (values[r] > maxVal) maxVal = values[r];
+  });
+
+  const svg = document.getElementById('route-svg');
+
+  svg.querySelectorAll('.route-label-text').forEach(el => el.remove());
+
+  ROUTES.forEach(r => {
+    const ratio = maxVal > 0 ? values[r] / maxVal : 0;
+    const col = heatColor(ratio);
+    const imgEl = document.getElementById('heat_img_' + r);
+    if (imgEl) imgEl.setAttribute('opacity', String(col.a));
+
+    const [cx, cy] = ZONE_LABELS[r];
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.classList.add('route-label-text');
+    text.setAttribute('x', cx);
+    text.setAttribute('y', cy + 6);
+    text.setAttribute('fill', '#fff');
+    text.setAttribute('font-size', '18');
+    text.setAttribute('font-weight', '700');
+    text.setAttribute('font-family', 'system-ui, sans-serif');
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('paint-order', 'stroke');
+    text.setAttribute('stroke', '#000');
+    text.setAttribute('stroke-width', '3');
+    text.textContent = `${r}: ${values[r]}`;
+    svg.appendChild(text);
+
+    const swatch = document.getElementById('swatch_' + r);
+    if (swatch) swatch.style.background = ratio > 0 ? `rgba(255,0,0,${0.3 + ratio * 0.7})` : '#444';
+  });
+}
+
+function drawLegend() {
+  const canvas = document.getElementById('legend-bar');
+  const ctx = canvas.getContext('2d');
+  for (let x = 0; x < 140; x++) {
+    const ratio = x / 139;
+    const c = heatColor(ratio);
+    ctx.fillStyle = colorStr(c);
+    ctx.fillRect(x, 0, 1, 12);
+  }
+}
+
+function loadFloorImage() {
+  const img = document.getElementById('floor-img');
+  img.src = 'floor-plan-new.png';
+}
+
+buildTabs();
+buildInputs();
+drawLegend();
+loadFloorImage();
+render();
+</script>
+</body>
+</html>

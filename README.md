@@ -13,3 +13,7 @@ A route heatmap visualizer of routes taken by students within the room
 ### Conflict Rate Calculator (`conflict calc widget.html`)
 
 Calculator for the current conflicts in the room, and uses the model we designed to calculate a predicted conflict amount for our new room design
+
+### Conflict Rate Graph (`conflict_rate_chart.html`)
+
+Displays the conflict rates of the pingpong table and billiards table. Showcases the difference between them.
